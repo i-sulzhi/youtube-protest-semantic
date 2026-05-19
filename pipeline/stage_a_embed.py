@@ -37,23 +37,42 @@ def parse_args():
     p.add_argument("--limit",     type=int, default=None,
                    help="if set, embed only the first N rows (for smoke testing)")
     p.add_argument("--device",    default="mps")
+    p.add_argument("--use-tags",  action="store_true",
+                   help="if set, include the 'tags' column in feed_e5 "
+                        "(requires --feed-csv pointing to an enriched feed)")
     return p.parse_args()
 
 
-def load_feed(path: str, max_chars: int) -> pd.DataFrame:
+def load_feed(path: str, max_chars: int, use_tags: bool) -> pd.DataFrame:
     df = pd.read_csv(path, dtype=str, keep_default_na=False, na_values=[""])
     # we wrote feed_text in the EDA notebook; truncate here
     df["feed_text"] = df["feed_text"].fillna("").str[:max_chars]
-    # e5 expects "passage: " prefix for indexed text
-    df["feed_e5"] = "passage: " + df["feed_text"]
+
+    if use_tags and "tags" in df.columns:
+        # When tags are available, give them their own slice of the input
+        # budget (e5 truncates beyond ~512 tokens ≈ 2000 chars in Cyrillic).
+        # Shrink the description portion to 1500 chars and append up to
+        # 500 chars of tags. Tags carry author-curated semantic labels and
+        # are often denser signal than the boilerplate tail of descriptions.
+        df["feed_text"] = df["feed_text"].str[:1500]
+        df["tags"]      = df["tags"].fillna("").str[:500]
+        df["feed_e5"]   = "passage: " + df["feed_text"] + " . теги: " + df["tags"]
+        print(f"      feed_e5 includes tags: median total length "
+              f"{int((df['feed_text'].str.len() + df['tags'].str.len()).median())} chars")
+    else:
+        # e5 expects "passage: " prefix for indexed text
+        df["feed_e5"] = "passage: " + df["feed_text"]
+        if "tags" not in df.columns:
+            df["tags"] = ""
+
     return df
 
 
 def main():
     args = parse_args()
 
-    print(f"[A.1] Loading feed: {args.feed_csv}")
-    df = load_feed(args.feed_csv, args.max_chars)
+    print(f"[A.1] Loading feed: {args.feed_csv}  (use_tags={args.use_tags})")
+    df = load_feed(args.feed_csv, args.max_chars, args.use_tags)
     if args.limit:
         df = df.head(args.limit).copy()
     print(f"      rows: {len(df):,}")
@@ -110,6 +129,7 @@ def main():
         "UA":                 (df.get("UA", pd.Series([False]*len(df))).astype(str).str.lower() == "true").values,
         "RU":                 (df.get("RU", pd.Series([False]*len(df))).astype(str).str.lower() == "true").values,
         "country_combo":      df.get("country_combo", pd.Series(["(none)"] * len(df))).fillna("(none)").values,
+        "tags":               df.get("tags", pd.Series([""] * len(df))).fillna("").values,
     })
 
     if args.table in db.table_names():

@@ -153,12 +153,16 @@ youtube-protest-semantic/
 │   ├── pipeline.ipynb          Notebook synthesising all four stages
 │   └── EDA.ipynb               Exploratory analysis of the text-ready subset
 ├── scripts/
-│   └── overnight_chain.sh      Sequential orchestrator for the e5-large run
+│   ├── overnight_chain.sh      Sequential orchestrator for the e5-large run
+│   └── build_demo_dataset.py   Reproducible demo-data generator
 ├── tests/
 │   ├── conftest.py             pytest path configuration
 │   └── test_fusion.py          Twenty unit tests over the fusion helpers
 ├── data/
 │   └── demo/                   Small reproducer dataset (200 YT_IDs + vectors)
+├── docs/
+│   ├── ARCHITECTURE.md         Design decisions with rationale (ADRs)
+│   └── RUNBOOK.md              Common operational tasks
 ├── requirements.txt            Pinned Python dependencies
 ├── README.md                   This file
 └── LICENSE                     MIT
@@ -166,6 +170,12 @@ youtube-protest-semantic/
 
 The `outputs/` directory is `.gitignored`. All artefacts are regenerated
 by running the four stage scripts in order.
+
+For *why* the pipeline is structured this way, see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). For step-by-step
+procedures (adding an anchor, swapping the encoder, debugging a stage
+failure, reproducing a published number), see
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ---
 
@@ -327,6 +337,21 @@ specific to the v2 design:
 ## Funding
 
 Austrian Academy of Sciences, *go!digital 3.0* programme.
+
+---
+
+## Tooling and assistance
+
+The v2 pipeline was developed with the assistance of Anthropic's
+Claude (Opus model family), used as an interactive coding
+collaborator for refactoring, regression-bug discovery, unit-test
+design, and documentation drafting. The collaboration log is partly
+preserved in the commit history (`Co-Authored-By` trailers) and
+in [`docs/RESULTS_LOG.md`](docs/RESULTS_LOG.md).
+
+The research question, the corpus design, the anchor formulations,
+the choice of methodology, and the interpretation of results are
+the responsibility of the authors.
 
 ---
 
