@@ -25,5 +25,22 @@ seaborn>=0.12              # tested 0.13.2
 tqdm>=4.65                 # tested 4.67.3
 jupyterlab>=4.0            # for v2_pipeline.ipynb and EDA_v2_text_ready.ipynb
 
+# --- SQL access for EXPORT scripts ---
+pymysql>=1.1               # tested 1.2.0 — drives local MariaDB via UNIX socket
+                           # (pure-Python, no C-extension). Required by
+                           # scripts/detect_title_edits.py and SQL-driven
+                           # EXPORTs (3 / 4 / 5 / 7).
+
+# --- hypergraph (EXPORT 7) ---
+hypernetx>=2.0             # tested 2.4.0 — LANL hypergraph library.
+fastjsonschema>=2.0        # tested 2.21.2 — hypernetx import dep (HIF I/O).
+                           # NOTE: hypernetx 2.4.0 has a pandas-API bug
+                           # (`misc_properties` attribute) that breaks
+                           # `Hypergraph()` construction on recent pandas.
+                           # `build_hypergraph.py` therefore defers hnx
+                           # validation behind a `--skip-hnx` flag and relies
+                           # on pure pandas for the actual analysis; hnx
+                           # only verifies vertex/edge counts when working.
+
 # --- tests (optional, dev only) ---
 pytest>=8.0                # tested 9.0.3 — run with `pytest tests/`
