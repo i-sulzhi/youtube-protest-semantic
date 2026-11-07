@@ -1,0 +1,5 @@
+grouping,mean_cosine
+overall (baseline),0.7941069602966309
+same language,0.8150048851966858
+same country_combo,0.8133713006973267
+same cluster (event/sense),0.8386381268501282

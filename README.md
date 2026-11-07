@@ -21,6 +21,35 @@ retrieval, and ensemble fusion.
 
 ---
 
+## Current state (June 2026) — map
+
+Stages A–D (recall) are complete; **Stage E (precision) shipped the main
+deliverable**: `outputs/stage_e/protest_index_gated.csv` — 387 ranked,
+relevance-gated protest videos (κ 0.611/0.735 vs human gold, ~97% survivor
+purity; datasheet: `docs/DATASHEET_protest_index.md`). On top of it sits an
+analytics layer (`analytics/` — master dataset 21,710 × 80+, five report
+modules, ad-hoc slicer) and ready-to-run infrastructure for every next step.
+
+```
+make help               # all 25+ targets
+make verify  / make test        # cache state / 45-test suite
+make analytics-master && make analytics   # canonical dataset → reports
+make slice Q='--where in_gated_index --by country_combo'
+```
+
+| waiting on | unlocks |
+|---|---|
+| PI codes round-2 + audit waves (`mini_study/coding_round2.html`, `coding_audit.html`) | gold v2 → stratified κ, re-tuning, LTR |
+| `YT_API_KEY` | real channels, churn attribution, 261K metadata backfill |
+| `OPENAI_API_KEY` | GPT second-annotator ensemble |
+
+Navigation: `docs/STAGE_E_ROADMAP.md` (tasks) · `docs/RESULTS_LOG.md`
+(every number, append-only) · `docs/DATA_MANIFEST.md` (artefacts + regen) ·
+`docs/DATA_GAPS.md` (unused DB signals) · `docs/ARCHITECTURE.md` (ADRs,
+incl. the §2 capture-funnel table that must accompany temporal claims).
+
+---
+
 ## Authors
 
 - **Ilya Sulzhytski** — PhD Researcher, Department of Slavonic Studies,

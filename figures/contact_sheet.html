@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<title>AGH talk — figury (contact sheet)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { margin:0; background:#15171a; color:#e8e8e8;
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
+  header { padding:16px 24px; background:#1f2227; border-bottom:1px solid #333; position:sticky; top:0; }
+  header h1 { margin:0; font-size:17px; }
+  header p { margin:4px 0 0; color:#9aa0a6; font-size:13px; }
+  .grid { display:flex; flex-direction:column; gap:28px; padding:24px; max-width:1100px; margin:0 auto; }
+  .card { background:#1f2227; border:1px solid #333; border-radius:10px; overflow:hidden; }
+  .card .meta { padding:12px 18px; border-bottom:1px solid #333; }
+  .card .slide { display:inline-block; background:#f5b342; color:#15171a; font-weight:700;
+                 padding:2px 9px; border-radius:5px; font-size:12px; margin-right:10px; }
+  .card .title { font-size:15px; font-weight:600; }
+  .card .desc { color:#9aa0a6; font-size:12.5px; margin-top:5px; line-height:1.5; }
+  .card img { width:100%; display:block; background:#fff; }
+  .toc { padding:0 24px 8px; max-width:1100px; margin:0 auto; }
+  .toc a { color:#f5b342; text-decoration:none; margin-right:14px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AGH talk — figury wystąpienia «Czy można ufać AI w badaniach społecznych?»</h1>
+  <p>Wszystkie regenerowalne z figures/make_fig*.py · dane z mini_study/ i outputs/ · zweryfikowane 2026-05-28</p>
+</header>
+<div class="toc" id="toc"></div>
+<div class="grid" id="grid"></div>
+
+<script>
+const FIGS = [
+  {f:"fig0_timeline.png", slide:"3", title:"Trajektoria badawcza — od tekstu do obrazu",
+   desc:"Dwie linie: tekst i sieci (2021-2024) → zwrot multimodalny (2023-2026). Pytanie metodologiczne wyrasta z przejścia."},
+  {f:"fig1_maturity_axis.png", slide:"5", title:"Oś dojrzałości walidacji",
+   desc:"tekst (dojrzała) → obraz (rozwijająca się) → wideo×słowiańskie (front). Kotwica koncepcyjna całego wystąpienia."},
+  {f:"fig2_recall_gain.png", slide:"7", title:"Wyszukiwanie semantyczne vs słowa kluczowe",
+   desc:"+60% / +116% pokrycia (UNION). Per-anchor: mediana 63% trafień bez słowa kluczowego. Dane: Stage B/D, odtworzone co do punktu."},
+  {f:"fig3_cluster_map.png", slide:"8", title:"Język czy rama? (teza centralna)",
+   desc:"t-SNE 8 klastrów + macierz centroidów. Lokalnie rządzi rama (NN 89% vs 82%), makro — język (RU 0,97 vs cross-lang 0,94)."},
+  {f:"fig4_kappa.png", slide:"9", title:"κ + confusion matrix (uczciwe 61%)",
+   desc:"⚠ obecnie SELF-TEST (claude_A jako zastępczy człowiek). Finalizuje się po ręcznym zakodowaniu 60 itemów."},
+  {f:"fig5_disagreement.png", slide:"10", title:"Niezgoda między modelami (Benchmark Illusion)",
+   desc:"Cross-model 28% (60) / 25% (200); cross-prompt Claude 12%, GPT 1,7%; jednomyślność 4 konfiguracji 68%. Model bias: GPT→antywojenny, Claude→neutral."},
+  {f:"fig6_formulas.png", slide:"B3", title:"Backup — formuły κ/α/DSL/PPI",
+   desc:"Slajd dla recenzenta metodologicznego (Olszowski). Egami 2023 (DSL), Angelopoulos 2023 (PPI)."},
+  {f:"fig7_multimodal.png", slide:"13", title:"Drugi filar — multimodalne wideo (wynik)",
+   desc:"Dokument Abramczyk o protestach 2020: 3 730 kadrów → adnotacja GPT-4o → 13 tematów (Ensemble LDA). Domyka tytuł «multimodalnych». Sulzhytski & Howanitz 2025, w recenzji."},
+  {f:"fig8_crossmodal.png", slide:"13", title:"Teza domknięta — niezgoda modeli w obu modalnościach",
+   desc:"TEKST: Claude vs GPT 25% niezgody (kategoria, pomiar własny N=200). WIDEO: GPT-4o vs LLaVA Jaccard 0,07–0,11 (DH 2025 = 0,07; własne przeliczenie na słowach kluczowych = 0,11). Różne metryki, ta sama lekcja. LLaVA open-weight."},
+  {f:"fig9_slavic_gap.png", slide:"13", title:"Luka słowiańska, konkretnie — jeden kadr, dwa odczyty",
+   desc:"Karta z tekstem rosyjskim: GPT-4o transkrybuje treść (12% klatek z cyrylicą), LLaVA nie czyta cyrylicy (0%) — zwraca „foreign/Bulgarian” + numery. Reprodukowalność vs zdolność (Spirling 2023) na materiale słowiańskim."},
+  {f:"fig11_video_validation.png", slide:"13 (backup)", title:"Walidacja wideo na ludzkim wzorcu (recall)",
+   desc:"247 ręcznie zakodowanych scen (close viewing) = gold. Czy MLLM odtwarza temat sceny? Makro-recall: GPT-4o 79%, LLaVA 70%. Flagi/noc ~100%, ale głosowanie tylko 35%/17% — model widzi obiekty, nie kontekst. Wspólny leksykon = minimalne DOF."},
+  {f:"fig10_disagreement_map.png", slide:"15", title:"KILLER — niezgoda jako instrument",
+   desc:"Niezgoda Claude/GPT NIE losowa: 49% na Białorusi-2020 = granica ram narodowa↔antywojenna (realny spór naukowy). Tam, gdzie nie zgadzają się modele — tam, gdzie nie zgadzają się badacze. Niezgoda = detektor spornych przypadków → human-in-the-loop (Gligorić 2024)."},
+];
+const toc = document.getElementById("toc");
+const grid = document.getElementById("grid");
+FIGS.forEach((x,i) => {
+  toc.innerHTML += `<a href="#f${i}">[${x.slide}] ${x.title.split("—")[0].trim()}</a>`;
+  grid.innerHTML += `
+    <div class="card" id="f${i}">
+      <div class="meta">
+        <span class="slide">slajd ${x.slide}</span>
+        <span class="title">${x.title}</span>
+        <div class="desc">${x.desc}</div>
+      </div>
+      <img src="${x.f}" alt="${x.title}" loading="lazy">
+    </div>`;
+});
+</script>
+</body>
+</html>

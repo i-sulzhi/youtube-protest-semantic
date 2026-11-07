@@ -91,6 +91,27 @@ Russo-Ukrainian war and continuing Belarus aftermath); pre-2024
 events such as Euromaidan-2014 are present mainly through
 retrospective coverage rather than contemporaneous reporting.
 
+**Quantified funnel (validated against MariaDB, 2026-06-10).** The
+search archive discovered **282,809** Politics-topic videos in total;
+the 21,710 in the corpus are **7.7%** of that population — the subset
+still public and surfacing during the Jan–Feb 2024 capture window.
+Capture rate by publish year:
+
+| Publish year | In corpus | All Politics | Capture rate |
+|---|---:|---:|---:|
+| ≤2019 | 756 | 7,040 | 10.7% |
+| 2020 | 939 | 15,566 | 6.0% |
+| 2021 | 1,134 | 37,338 | 3.0% |
+| 2022 | 1,489 | 95,178 | **1.6%** |
+| 2023 | 5,037 | 103,416 | 4.9% |
+| 2024 (Jan–Feb) | 12,355 | 24,271 | 50.9% |
+
+57% of the corpus was published in Jan–Feb 2024; ~80% in 2023–24. The
+protest waves of interest (Belarus 2020, Navalny 2021, antiwar /
+mobilisation 2022) sit in the worst-covered years, and content deleted
+before January 2024 cannot appear at all (survivorship). Any claim
+about the historical waves must carry this table.
+
 ---
 
 ## 3. Why `multilingual-e5` as the encoder family

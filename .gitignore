@@ -39,3 +39,17 @@ data/*.json
 # Inspection artefacts derived from raw text (kept locally only)
 inspection_*.csv
 outputs/inspection_*.csv
+CLAUDE.md
+AGENTS.md
+
+# Private: kept in the OneDrive snapshot (docs/DATA_MANIFEST.md), never in this public repo.
+# Row-level sheets and LLM inputs/outputs carry video titles and descriptions, which hold
+# personal contact details; the talk brief and the backups are private too.
+AGENT_BRIEF_AGH_talk.md
+backups/
+codebook_experiment/data/
+mini_study/*.csv
+mini_study/*.html
+mini_study/*.json
+mini_study/llm_input/
+mini_study/llm_predictions/

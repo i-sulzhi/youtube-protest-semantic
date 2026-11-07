@@ -730,3 +730,433 @@ Saved to `outputs/sampling_validity.csv` (17 rows, 805 bytes).
 4. **Manual inspection of the 185 incremental videos** to verify they
    are genuinely relevant (vs precision loss).
 
+---
+
+## Stage E v1 — ranked protest-video index (DONE, 2026-06-02)
+
+**Goal.** Turn the recall-maximised retrieval pool into a *clean ranked index
+of protest videos*. Directly addresses the precision gap the codebook
+experiment measured: ~70% of retrieved videos are not *directly* about protest
+(`mini_study/` layer-2: 42/60 non-direct). This is the long-deferred Stage E
+(ADR §"Decisions deferred"), now unblocked by (a) the 60-item human gold and
+(b) the multi-signal EXPORT features.
+
+**Precondition — regen.** Most pipeline outputs were not persisted on disk.
+Re-derived the four structural feature tables from MariaDB by pointing the
+EXPORT scripts at the no-tags feed (`--feed outputs/v2_feed_ready.csv.gz`):
+`engagement_features.csv`, `churn_signal.csv`, `search_features.csv`,
+`hypergraph/vertex_stats.csv` — all 21,710 rows, numbers reproduce the figures
+logged above. Candidate pool for v1 = the existing e5-large no-tags retrieval
+(`outputs/retrieval_e5large/topk_per_anchor.csv`, 496 distinct videos). Full
+4-way UNION (1,105) deferred to a background embedding run.
+
+**Component 1 — composite ranking** (`scripts/stage_e_rank.py`). One row per
+video; z-scored weighted sum of semantic similarity + `velocity_d7_z` +
+hypergraph `broker_score` + search `visibility_days_top10`, plus an
+anchor↔`primary_term_canon` consistency bonus and a `churned_90` penalty.
+Weights hand-set and documented (60 labels too few to fit). Validated on the
+60 gold:
+
+| Ranker | AUC relevant-vs-absent | AUC direct-vs-absent |
+|---|---:|---:|
+| cosine similarity (baseline) | 0.662 | 0.711 |
+| **composite (Stage E)** | 0.667 | **0.744** |
+
+Spearman(composite, relevance ordinal) = 0.355 (p=0.005). Mean index rank
+direct 153 < indirect 226 < absent 266 (monotone). Structure adds precision on
+the clean direct-vs-absent contrast; the embedding already does most of the
+coarse relevant/absent split.
+
+**Component 2 — LLM relevance gate** (`scripts/build_relevance_briefings.py` +
+6 Claude sub-agents + `scripts/stage_e_gate.py`). Claude-as-annotator (6
+independent sub-agents, Write-only, 83 items each) labelled all 496 on the
+`protest_relevance` topic axis (direct/indirect/absent), codebook v0.2 §2.
+LLM distribution: direct 123 / indirect 64 / **absent 309 (62%)**. Validated
+vs the 60 human gold on the same axis:
+
+| Metric | Value |
+|---|---:|
+| 3-class accuracy / Cohen κ | 0.750 / **0.611** |
+| binary relevant-vs-absent acc / κ | 0.867 / **0.735** |
+| human-absent correctly cut | 24/25 |
+| human-direct preserved (never cut) | **18/18** |
+
+Confusion shows the gate's only false-negatives are `indirect` (peripheral)
+videos pushed to `absent` — `direct` protest is never dropped, the right
+failure mode for a precision gate. The LLM (text-only) over-calls `absent`
+relative to the human (who watched videos / knew the channel) — the same
+info-asymmetry the codebook's 87%-extratextual finding predicts.
+
+**Deliverable.** `outputs/stage_e/protest_index_gated.csv` — **187 videos**
+(496 → 187, 38% kept), composite-ranked, direct∪indirect only. Quality on the
+29 gold items that survive: **28/29 = 97% are human-protest** (1 absent leaked).
+Top-10 is all genuine protest (Navalny court speech / protests; Belarus-2020
+post-election protests and dispersals). Per-anchor survivors concentrate on
+BY-2020 (62) and RU-Navalny (59), consistent with the Belarus-centric corpus
+bias. Trade-off: high precision (97%) at some recall cost (LLM cut 7/35
+human-relevant, all peripheral) — the right side for a "clean index".
+
+**Artefacts.** `scripts/stage_e_rank.py`, `scripts/build_relevance_briefings.py`,
+`scripts/stage_e_gate.py`; `outputs/stage_e/{protest_index,protest_index_scored,
+protest_index_gated}.csv`, `{validation_report,gate_report}.md`,
+`relevance_pred/claude_chunk*.jsonl`.
+
+**Next.** Expand pool to full 4-way UNION (1,105); tune composite weights now
+that a gate exists; route `indirect`/low-confidence items to human review
+(active learning); add channel prior (87%-extratextual lever). Then the
+analytics phase (semantic ∪ hypergraph ∪ channel as a structural result).
+
+## Stage E v1.1 — pool expansion to the full 4-way UNION (DONE, 2026-06-02)
+
+**Goal.** Roadmap Task 1: widen the gate's input from the 496-video e5-large
+no-tags pool to the recall-max UNION, so more true-protest videos reach the
+gate. Done in two increments — first the unblocked **2-way no-tags UNION**, then
+(once the user restored `complete_video_info_202404251556.csv`) the **full 4-way
+UNION** (no-tags ∪ with-tags × e5-small/large).
+
+**Method.** Stage A embeds of the 21,710-video subset on MPS fp16: e5-small
+no-tags (348s → table `videos`), then — after `enrich_with_tags.py` produced
+`v2_feed_ready_with_tags.csv.gz` (90.4% tag coverage, median 22 tags/video) —
+e5-small+tags (421s → `videos_with_tags`) and e5-large+tags (2582s →
+`videos_e5large_with_tags`). Stage B retrieved the 7 anchors top-100 for each.
+`scripts/four_way_ensemble.py` UNION:
+
+| pool | distinct | newly-surfaced |
+|---|---:|---:|
+| e5-large no-tags (v1) | 496 | 327 |
+| **2-way** (small ∪ large, no-tags) | **796** | 525 |
+| **4-way** (+ both with-tags) | **1,099** | 709 |
+
+Adding the tags variants gives **+184 newly (+35%)** over the 2-way no-tags
+UNION — reproduces the historical 4-way finding (1,105 / 712). Pairwise top-100
+overlap stays low across encoder×tags configs (28–61/100), confirming the four
+sources are complementary, not redundant.
+
+**Incremental gate.** Extended `build_relevance_briefings.py` with
+`--exclude-pred-glob` + `--chunk-offset` so each expansion only briefs the NEW
+videos and reuses prior labels: 496 → +300 (2-way, chunks 7–10) → +303 (4-way,
+chunks 11–14). Claude sub-agents labelled the new chunks. **Both rounds the
+agents silently dropped a few items while reporting completeness** (4 in 2-way,
+3 in 4-way); a briefing-vs-JSONL coverage diff caught them and they were
+hand-labelled into `claude_chunk_fix_dropped*.jsonl`. All 1,099 now carry a
+`protest_relevance` label (0 missing, validated).
+
+**Validation (unchanged, by construction).** The 60-item gold is a subset of all
+pools and its labels were reused verbatim, so the gate metrics are identical
+across v1 / 2-way / 4-way: 3-class κ **0.611**, binary κ **0.735**, **18/18**
+human-direct preserved, **24/25** human-absent cut, gold-survivor purity
+**28/29 = 97%**. The expansion is precision-neutral on the gold by construction;
+it buys recall.
+
+**Deliverable.** `outputs/stage_e/protest_index_gated.csv` — **387 videos**
+(v1 187 → 2-way 263 → **4-way 387**, +200 / +107% over v1), 1,099 → 387 kept
+(35%). LLM relevance over the 1,099: direct 249 / indirect 138 / absent 712 (65%
+cut as topic-noise). Per-anchor survivors (v1 → 2-way → 4-way): BY-2020
+62→84→**135**, RU-Navalny 59→79→**96**, general-protest →32→**58**, RU-antiwar
+→25→**43**, RU-mobilisation →28→**30**, **UA-Maidan 3→9→14**, UA-current
+6→**11**. Every anchor grew; the under-sampled UA anchors more than tripled /
+doubled. Top-12 is all genuine `direct` protest (DW News Belarus crackdown /
+rallies / strikes, Navalny court speech, Minsk Aug-9 dispersal, Bashkiria
+clashes).
+
+**Ranking note (for Task 2).** `best_similarity` is `max` over sources with
+different cosine scales. This dipped composite ranking on the noisy 2-way pool
+(AUC direct-vs-absent 0.673) but **recovered on the 4-way** (0.740, ≈ v1's
+0.744; relevant-vs-absent 0.632; Spearman 0.316, p=0.014) — more videos found by
+multiple sources stabilise the max. Composite still beats raw cosine on both
+contrasts. Gate **membership** is LLM-label driven (unaffected by score); only
+within-index ordering uses the composite. Per-source similarity normalisation
+remains a clean Task-2 improvement.
+
+## Stage E v2 — Task 2: composite tuning & ablation (DONE, 2026-06-03)
+
+**Goal.** Roadmap Task 2: with the gate in place, optimise the *ranking* (not
+membership). New research harness `scripts/stage_e_tune.py` runs three analyses
+on the 60 gold over the 4-way pool — similarity-aggregation comparison, a
+leave-one-component ablation, and a 5-fold cross-validated weight search — and
+writes `outputs/stage_e/tuning_report.md`. Guarded against overfitting: only the
+weight *magnitudes* could overfit (60 labels), so those are reported OOF and the
+v1 hand-set magnitudes are kept; the adopted changes are either unsupervised or
+ablation-robust.
+
+**Finding 1 — similarity aggregation is the biggest lever.** `best_similarity`
+was a `max` over four sources with different cosine scales (the Task-1 caveat).
+Z-scoring cosine *within each source* before the cross-source max (`zmax`) is an
+unsupervised transform (no label use → no overfit risk) and lifts AUC
+direct-vs-absent **0.740 → 0.802**. (`rankmax` 0.782, `zmean` 0.773 also beat raw
+max.) Adopted as the default `--sim-agg zmax` in `stage_e_rank.py`.
+
+**Finding 2 — ablation: two components don't earn their weight.** Leave-one-out
+on the gold (Δ = full − without, AUC dir-abs): similarity dominates (Δ +0.204),
+velocity helps (+0.022), broker a little (+0.004), visibility ≈ 0; but
+**consistency_bonus (−0.009) and churn_penalty (−0.029) are negative** — dropping
+them *improves* ranking. The 5-fold search independently zeroes both in ~5/5
+folds. Mechanism: the LLM gate now does the anti-false-positive job the
+consistency bonus proxied for; and the churn penalty demotes genuine *old*
+protest content — on the gold, direct videos churn *more* than absent (33% vs
+28%), because 2020-era protest footage lost engagement. Both set to **0**.
+
+**Finding 3 — magnitude search is noise.** CV weight search beat hand-set by only
+**+0.020** AUC dir-abs (OOF 0.822 vs 0.802) with unstable broker/visibility
+magnitudes across folds → kept the documented sim/vel/broker/vis magnitudes
+rather than chase 60-label noise. Revisit after Task 4 enlarges the gold.
+
+**Adopted (v2) = `zmax` + `consistency_bonus=0` + `churn_penalty=0`**, sim/vel/
+broker/vis unchanged. Re-ran rank + gate on the 4-way pool:
+
+| Ranker | AUC dir-abs | AUC rel-abs | Spearman | mean rank dir/ind/abs |
+|---|---:|---:|---:|---|
+| v1 (max_raw, hand-set) | 0.740 | 0.632 | 0.316 | 446 / 688 / 729 |
+| **v2 (zmax, tuned)** | **0.840** | **0.753** | **0.493** | **274 / 458 / 599** |
+
+The adopted 0.840 sits at the optimistic refit (0.844) yet uses *no* searched
+magnitudes, so the gain is principled, not overfit. **Gate membership is
+unchanged** — still **387** videos, κ 0.611/0.735, 18/18 direct kept, 24/25
+absent cut, 97% gold-survivor purity (the gate is LLM-label driven; only the
+within-index ordering improved). Top-10 unchanged in spirit (DW News Belarus
+crackdown/rallies/strikes, Navalny court speech) but better separated: mean rank
+of `direct` moved 446 → 274. `protest_index.csv` now carries a `sim_agg` column.
+Reproduce v1 ranking with `--sim-agg max_raw` and the old weights.
+
+## Stage E Task 3 — channel prior (description-proxy) (DONE, 2026-06-03)
+
+**Blocker resolved by proxy.** Roadmap Step 0 assumed a channel/uploader field in
+MariaDB — there is **none** (checked every table in every DB, the feed, and
+`complete_video_info`; the only canonical source is the YouTube Data API, which
+needs a key + network). With the user's go-ahead we used a **description-proxy
+channel**: the Telegram / YouTube-channel / Instagram handle each video promotes
+(`scripts/build_channel_features.py`). Imperfect (a promoted link ≠ always the
+uploader; ~57% pool coverage) but it cleanly surfaces the codebook-named outlets.
+
+**Channel rates** (over the LLM-labelled pool): top proxy channels by
+protest-relevant rate are exactly the expected ones — DW (English/Russian) 100%,
+`varlamov` 100%, SOTA Vision 90%, Vot-Tak 85%, Belsat 72%, **UNIAN 71%**,
+Current Time, Euroradio, Maxim Katz. 74 channels have ≥2 pool videos (544 videos).
+
+**Concentration (structural finding for Task 5).** Over the 387-video gated
+index, 258 (67%) carry a proxy across **89 channels**: **Gini 0.515** (counts are
+unequal — a few big outlets + a long singleton tail) but **HHI 0.030 (diffuse)** —
+no single dominant hub, top-5 channels = 30% of proxy-covered survivors. So
+protest coverage is *spread across many outlets but unevenly* — not the
+hub-and-spoke pattern of the PI's Telegram work, at least at this proxy
+resolution.
+
+**Ranking lift (honest, leave-one-out).** `channel_relevant_rate_loo` (excludes
+the scored video's own label), z-scored, added to the v2 composite. AUC dir-abs
+peaks at **w=0.5: 0.840 → 0.860 (+0.020)**, Spearman 0.493 → 0.514; degrades for
+w≥1.0. But only **16/60** gold items are proxy-covered → suggestive, not
+conclusive, and in the same noise band Task 2 rejected. (With the *full* rate,
+production-style, the lift looks bigger — 0.871 — but that has mild self-leak and
+is optimistic.)
+
+**Decision.** Wired channel into `stage_e_rank.py` as an **optional, off-by-default**
+feature (`--channel-weight`, `CHANNEL_WEIGHT=0`): the capability + table
+(`outputs/channel_features.csv`) ship, the qualitative signal is strong, but the
+production index is **unchanged** (still 0.840 / 387) — reshaping the public index
+on a half-coverage proxy validated by 16 gold items isn't justified. Recommended
+`--channel-weight 0.5` once API channels give full coverage or Task 4 enlarges
+the gold. Artefacts: `scripts/build_channel_features.py`,
+`outputs/channel_features.csv`, `outputs/stage_e/channel_report.md`.
+
+## Stage E Task 4 — active learning: grow the gold (INSTRUMENT READY, 2026-06-03)
+
+**Goal.** Roadmap Task 4: expand the 60-item human gold with the most
+*informative* items so κ (which validates the gate) rests on more than 60 labels.
+The agent prepares the instrument + the κ-recompute path; it does **not**
+fabricate human labels — the PI codes.
+
+**Selection** (`mini_study/build_active_learning_sheet.py`). From the 1,039
+uncoded pool videos, tag the gate's uncertain zone: LLM `confidence==1` (97),
+`indirect` predictions (130), gate-`absent`-but-high-composite-rank (possible
+false-negatives, 130), and kept-but-low-rank (56) — 342 items carry ≥1 tag. An
+uncertainty score (3·conf1 + 2·indirect + 2·gate_fn + 1·lowrank) + round-robin
+across anchors picks a balanced **wave of 50**: 7–8 per anchor; by LLM label 30
+indirect / 19 absent / 1 direct; 48/50 are LLM-low-confidence. This is exactly
+the κ-fragile zone (the confident `direct` mass is deliberately under-sampled).
+
+**Instrument (blind, no anchoring).** Three artefacts:
+- `mini_study/coding_sheet_round2.csv` — blind sheet (TITLE/DESC/anchor/lang +
+  empty `protest_relevance`/confidence/notes; **no LLM label or score shown**).
+- `mini_study/coding_round2.html` — self-contained click-to-code UI (direct/
+  indirect/absent buttons, 1/2/3 keys, YouTube links so the PI can watch,
+  localStorage autosave, Export-CSV). Embeds the 50 items; no server needed.
+- `mini_study/round2_selection_manifest.csv` — internal provenance (why each item
+  was picked: tags, LLM label, confidence, rank) for the post-hoc flip analysis.
+
+**Recompute path** (`mini_study/merge_round2_gold.py`). Folds round-1 (60) +
+the PI's round-2 labels → `mini_study/coding_gold_v2.csv` (≤110 items), skipping
+any blank/invalid rows (verified: refuses to run on the empty sheet — no
+fabrication), and reports human↔LLM agreement on the new items. Then
+`stage_e_gate.py --gold coding_gold_v2.csv` and `stage_e_tune.py --gold …`
+recompute κ and re-run the ablation/weight search on the larger gold — which
+also firms up the two findings parked on 60 labels (Task-2 magnitude search,
+Task-3 channel lift) and answers the roadmap's open question (v1 cut 7/35
+human-relevant — does more gold recover any?).
+
+**Status.** Everything is ready; **κ recompute awaits the PI's hand-coding** of
+the 50-item sheet (the one step the agent must not do).
+
+
+## Validation pass — raw dataset (2026-06-10)
+
+Systematic QA of the raw layer (MariaDB dump, `complete_video_info` CSV, feed
+derivation). **Everything structural verified exactly**: all 9 table row counts
+match the reference; `VIDEOS.YT_ID` and `VIDEO_METADATA (YT_ID, DATE)` are
+unique (the latest-snapshot join cannot explode); VID_TOPICS has no duplicate
+pairs and no orphans; Politics ∩ metadata = 21,710 exactly; the tags CSV is
+key-unique (350,356) with v2 coverage 19,623 / 21,710 = 90.4% (median 22 tags /
+346 chars, max 4,982); STATS covers 21,710/21,710; EXPORT-10 day counts
+reproduce (incl. `navalny` = exactly 1 search/day, 1,099 = 1,099).
+
+Three issues found and fixed:
+
+1. **«стачк» regex bug.** The protest pattern's `stachk\w*` branch was Latin
+   script and matched 0 videos; Belarusian «стачка» (strike) is Cyrillic. Six
+   videos contain «стачк», four of which carried no other protest keyword and
+   were mislabelled non-protest-mentioning. Fix: added `стачк\w*` to
+   `scripts/regen_feed_ready.py` + `notebooks/EDA.ipynb`; regenerated both feeds
+   (diff-verified: only the 3 flag columns changed, only those 4 videos;
+   `feed_text` byte-identical → embeddings unaffected). `protest_anywhere`
+   2,045 → **2,049**. One affected video (`xhwJQhamI_w`, BY-2020 pool) flowed
+   downstream: patched `retrieval_e5large_with_tags/topk_per_anchor.csv`, then
+   re-ran `four_way_ensemble.py` → `stage_e_rank.py` → `stage_e_gate.py`.
+   4-way UNION newly-surfaced **709 → 708** (+183 from tags variants, was
+   +184). **All production numbers unchanged**: pool 1,099, gated 387 (same
+   membership, same order), AUC 0.840 / 0.753, Spearman 0.493, κ 0.611 / 0.735.
+   The lance tables keep the stale flag for the 4 videos until the next
+   re-embed (see DATA_MANIFEST flag-drift note).
+
+2. **Corpus funnel quantified** (was qualitative in ADR-2): 282,809
+   Politics-topic videos discovered; 21,710 (7.7%) metadata-captured. Capture
+   rate by publish year: 2020 6.0%, 2021 3.0%, **2022 1.6%**, 2023 4.9%,
+   2024 50.9% — 57% of the corpus published Jan–Feb 2024. Table added to
+   `ARCHITECTURE.md` §2; must accompany any claim about historical protest
+   waves (survivorship: content deleted before Jan 2024 is invisible).
+
+3. **`outputs/sampling_validity.csv` re-emitted** (17 rows; was missing from
+   disk) and added to the DATA_MANIFEST.
+
+Also documented: regenerated-feed flag drift vs historical logs (2,034 → 2,045
+pre-fix → 2,049 post-fix; `country_combo` cells ±9) is snapshot/regex
+dependence, not a data error — see DATA_MANIFEST note.
+
+## Block-0 instruments ready (2026-06-10)
+
+Pre-built everything that runs the moment the PI codes round-2 (per the
+approved development plan, Block 0):
+
+1. **`stage_e_gate.py` upgraded** (output CSVs verified byte-identical):
+   κ stratified by gold `round` (round-2 is uncertainty-selected → pooled κ
+   is composition-biased; report rounds separately); automatic
+   briefing-vs-JSONL coverage check (the sub-agent-drop gotcha is now a loud
+   warning, not a manual ritual); confidence-calibration table — already
+   informative on round-1 gold: **conf=1 → acc 0.46 (n=13), conf=2 → 0.79,
+   conf=3 → 0.89** — supports auto-routing conf=1 to human review.
+2. **`mini_study/analyze_round2_flips.py`** — post-hoc flip analysis of the
+   active-learning wave (per-tag flip rates, confusion, gate consequences);
+   refuses to run on an uncoded sheet.
+3. **`mini_study/build_audit_wave.py`** — RANDOM 20-item wave (seed=42),
+   stratified by retrieval provenance (8 tags_only / 6 mixed / 6 no_tags_only),
+   excludes the 110 coded/queued; blind sheet + `coding_audit.html`. Gives the
+   unbiased gate-accuracy estimate on the 603 expansion videos that round-2
+   (adversarial by design) cannot. Merge as round 3:
+   `merge_round2_gold.py --filled coding_sheet_audit_FILLED.csv
+   --round1 coding_gold_v2.csv --round-label 3 --out coding_gold_v3.csv`
+   (merge script now preserves/labels rounds).
+4. **`tests/test_stage_e_invariants.py`** — golden-numbers regression
+   (pool 1,099; gated 387 = direct∪indirect; dist 249/138/712; newly 708;
+   κ 0.611/0.735; feed flag 2,049; full label coverage). Suite: **40/40**.
+
+PI workload queued: 50 (round-2) + 20 (audit) items in two click-to-code HTML
+instruments. After coding: merge → `stage_e_gate.py --gold coding_gold_v2.csv`
+(stratified κ) → `stage_e_tune.py --gold …` → `analyze_round2_flips.py`.
+
+## Infrastructure pass — DB audit + ready-to-run scaffolding (2026-06-11)
+
+**DB audit** (`docs/DATA_GAPS.md`): full column sweep of all 9 tables. Found
+unused: topic flags beyond Politics (Military 1,105 / TV 737 — cheap relevance
+features; Society degenerate at 99.3%), CAPTION=true 1,638 (also a future
+caption-text source), creativeCommon 452, age-restricted 47, EMBEDDABLE=0 249,
+live 246, DEFAULT_LANG 12,817. Dead: FAVORITE_COUNT (all 0), SEARCHES.LIMIT
+(constant). **Tags are fully regenerable from VID_TAGS (19,624 ≥ CSV's
+19,623)** — the complete_video_info CSV dependency is droppable.
+
+**Built and tested** (every script either ran end-to-end or proved its
+graceful waiting-for-input exit; suite 40/40; `make help` lists all):
+
+| Block | Script | Status |
+|---|---|---|
+| audit | `build_static_flags.py` → static_flags.csv | ✅ ran (21,710) |
+| 1.1 | `fetch_video_api.py` (+ shared `yt_api.py`, checkpointed) | ⏳ YT_API_KEY (dry-run OK: pool=22 units) |
+| 1.2 | `build_channel_features.py --api-csv` (proxy fallback; regression: shared cols identical) | ✅ |
+| 1.3 | `channel_expand_pool.py` | ✅ ran (200 cands from 6 channels on proxy) |
+| 1.4 | `disentangle_churn.py` | ⏳ video_api.csv |
+| 2.1 | `gate_ensemble.py` (same codebook as Claude briefings; disagreements → next human wave) | ⏳ OPENAI_API_KEY |
+| 2.4 | `train_distilled_gate.py` | ✅ ran: student OOF-vs-teacher κ3 0.491; vs human κ3 0.375 / κ2 0.385 (teacher 0.611/0.735) — retrain after gold v2 / pool growth; corpus inference 21,710 written |
+| 3.1 | `stage_e_ltr.py` | ✅ smoke on 60: LTR LOSES to hand-set (−0.04/−0.10 OOF) — confirms Task-2; real run on gold v2 |
+| 3.2 | `data/event_calendar.csv` (17 events) + `build_event_features.py` | ✅ ran (96 in ±7d window) |
+| 4.1 | `fetch_metadata_bulk.py` (priority 2022→2021→2020; id cache built: 261,099 ≈ 5,222 units) | ⏳ YT_API_KEY |
+| 5.1 | `stage_f_modalities.py` | ✅ ran: hypergraph k=3 → 14,301 (too broad, threshold is the analysis knob), pool-precision proxy 0.183 vs semantic 0.352 |
+| 6.1 | `Makefile` (22 targets) | ✅ |
+
+Production index untouched throughout (gate 387 byte-identical; suite green).
+
+## Analytics layer — end-to-end scaffolding (2026-06-11)
+
+New `analytics/` package: every analytical task starts from ONE canonical
+table and ends in a markdown report.
+
+- **`analytics/build_master.py`** (`make analytics-master`) — the master join:
+  **21,710 × 74** (feed + engagement + churn + search + hypergraph + static
+  flags + distilled gate + pool/Stage-E layers + channels + events + gold +
+  modalities), prefixed where sources collide, integrity-asserted.
+- **`analytics/lib.py`** — shared load/report/figure helpers + Gini/HHI +
+  **capture-rate correction** (`data/capture_rates.csv`, from the audited
+  funnel; ≤2019 pooled).
+- **`analytics/slice.py`** (`make slice Q='…'`) — ad-hoc filter→group→agg CLI
+  for questions that don't deserve a module.
+- **5 modules + `run_all.py`** (`make analytics`) → `outputs/analytics/INDEX.md`.
+  First findings, all 5 green:
+  | module | first result |
+  |---|---|
+  | temporal | raw publish peak 2024-01, but **capture-corrected peak = 2021** — the funnel inverts the temporal story |
+  | channels | 89 channels, Gini 0.51 / HHI 0.030; **28 multi-anchor channels** (channel-level brokers) |
+  | anchors | 2 off-diagonal discovery anomalies ≥10% (cross-border circulation candidates) |
+  | cohorts | B over-represented in the index 1.7× vs feed share |
+  | brokers | **hypergraph brokers are a blind spot**: 1/132 of ≥3-term videos in the index (gated rate 1% vs 1.8% baseline) — they rarely enter the semantic pool at all |
+- Tests: `tests/test_analytics_master.py` (master invariants + capture-rate
+  provenance). Suite **45/45**.
+
+Module contract: `an_<topic>.py` exposing `run(master) -> (path, summary)`,
+registered in `run_all.MODULES`. Master rebuild is idempotent and must follow
+any upstream artefact change (`make analytics-master && make analytics`).
+
+## Max-out pass — remaining no-input blocks closed (2026-06-11)
+
+1. **Tags from DB** (`make tags-db`): `enrich_with_tags.py --from-db` pulls
+   VID_TAGS⋈TAGS — verified **100.0% identical tag SETS** vs the CSV on all
+   19,623 shared videos (+1 extra covered). The 174-MB
+   `complete_video_info_*.csv` dependency is now removable (tag order differs
+   → switch at the next planned re-embed).
+2. **EXPORT trajectory** (`make trajectory`): curve shapes from 1.62M STATS
+   snapshots + rank dynamics from 1.68M SEARCH_RESULTS rows →
+   `outputs/trajectory_features.csv` (burst_ratio, t50, growth_after_d30,
+   revival, rank_slope/volatility). **Finding: `direct` videos revive 2.4×
+   more often than `absent` (27% vs 11%) and gain 41% vs 22% of views after
+   day 30** — protest footage is resurrected, not just consumed at publish.
+   Wired into the master (81 cols) and stage_e_ltr features.
+3. **Rationale mining** (`make rationales`): 1,099 gate rationales embedded
+   (e5-small) + KMeans-12 → `outputs/stage_e/rationale_clusters.md`; most
+   error-prone cluster #11 (5/10 gold wrong, n=87) = codebook-v0.3 input.
+4. **Distilled gate honesty + mining**: gold now HELD OUT of student training
+   → honest κ3 0.311 / κ2 0.276 (was 0.375 optimistic; teacher 0.611/0.735).
+   `make distill-mine`: **1,189 outside-pool videos with P(direct)≥0.5**;
+   top-200 exported as the third expansion source (67 carry no protest
+   keyword = pure embedding blind-spot finds).
+5. **Modality threshold sweep** in stage_f: precision proxy rises 0.173→0.258
+   for k=2→50, all below semantic 0.352 — the knob + its trade-off are now in
+   the report.
+6. **Datasheet** `docs/DATASHEET_protest_index.md` (Gebru-style, full lineage
+   + limitations) and a **Current state map** section in README.
+
+Suite: 45/45. Master: 21,710 × 81. Production index untouched (387).
